@@ -1,0 +1,23 @@
+[package]
+name = "mirust"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "SDK for exporting mIRC/AdiIRC-compatible DLL functions in Rust."
+homepage = "https://github.com/irc-rs/mirust"
+repository = "https://github.com/irc-rs/mirust"
+readme = "README.md"
+keywords = ["irc", "ircx", "mIRC", "AdiIRC", "DLL"]
+categories = ["development-tools"]
+maintenance = { status = "passively-maintained" }
+
+[dependencies]
+mirust_macros = { version = "0.1" }
+
+[dependencies.windows]
+version = "0.62"
+features = [
+    "Win32_Globalization",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+]
