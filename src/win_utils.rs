@@ -45,7 +45,10 @@ pub(crate) fn get_mirc32_hwnd() -> HWND {
             }
         }
 
-        let _ = EnumWindows(Some(enum_windows_proc), LPARAM(&mut context as *mut _ as isize));
+        let _ = EnumWindows(
+            Some(enum_windows_proc),
+            LPARAM(&mut context as *mut _ as isize),
+        );
         context.result
     }
 }

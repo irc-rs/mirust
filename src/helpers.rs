@@ -1,4 +1,6 @@
-use windows::{Win32::Globalization::{CP_ACP, MB_ERR_INVALID_CHARS, MultiByteToWideChar, WideCharToMultiByte}};
+use windows::Win32::Globalization::{
+    CP_ACP, MB_ERR_INVALID_CHARS, MultiByteToWideChar, WideCharToMultiByte,
+};
 
 pub fn pwstr_to_string(ptr: *const u16, maxlen: usize) -> String {
     if ptr.is_null() {
@@ -6,7 +8,7 @@ pub fn pwstr_to_string(ptr: *const u16, maxlen: usize) -> String {
     }
 
     let maxlen = maxlen & !1 / 2; // Convert byte length to number of u16 characters
-    
+
     // Make sure we don't return the null terminator
     let slice = unsafe { std::slice::from_raw_parts(ptr, maxlen) };
     let len = slice.iter().position(|&c| c == 0).unwrap_or(maxlen);
@@ -68,10 +70,7 @@ pub fn string_to_pstr(s: &str, ptr: *const u8, maxlen: usize) {
 ///
 /// If `ansi_str_ptr` is null, or if the conversion fails, this function
 /// returns a `Vec<u16>` containing only a single null terminator (`vec![0]`).
-fn convert_ansi_to_wide_string(
-    ansi_str_ptr: *const u8,
-    max_ansi_bytes: usize,
-) -> Vec<u16> {
+fn convert_ansi_to_wide_string(ansi_str_ptr: *const u8, max_ansi_bytes: usize) -> Vec<u16> {
     // A null-terminated empty string is the safest default return.
     let null_terminated_empty_wide = || vec![0u16];
 
@@ -80,8 +79,7 @@ fn convert_ansi_to_wide_string(
     }
 
     // This operation remains unsafe as we are trusting the caller's pointer
-    let ansi_buffer_slice =
-        unsafe { std::slice::from_raw_parts(ansi_str_ptr, max_ansi_bytes) };
+    let ansi_buffer_slice = unsafe { std::slice::from_raw_parts(ansi_str_ptr, max_ansi_bytes) };
 
     // Find the length of the *content* (excluding the null terminator).
     let ansi_len_no_null = ansi_buffer_slice
@@ -114,8 +112,7 @@ fn convert_ansi_to_wide_string(
     }
 
     // Allocate the exact buffer size: content + 1 for the null.
-    let mut wide_buffer: Vec<u16> =
-        vec![0u16; (required_wide_chars + 1) as usize];
+    let mut wide_buffer: Vec<u16> = vec![0u16; (required_wide_chars + 1) as usize];
 
     // PASS 2: Perform the actual conversion.
     let chars_written = unsafe {
@@ -157,10 +154,7 @@ fn convert_ansi_to_wide_string(
 ///
 /// If `wide_str_ptr` is null, or if the conversion fails, this function
 /// returns a `Vec<u8>` containing only a single null terminator (`vec![0]`).
-pub fn convert_wide_to_ansi_string(
-    wide_str_ptr: *const u16,
-    max_wide_chars: usize,
-) -> Vec<u8> {
+pub fn convert_wide_to_ansi_string(wide_str_ptr: *const u16, max_wide_chars: usize) -> Vec<u8> {
     // A null-terminated empty string is the safest default return.
     let null_terminated_empty_ansi = || vec![0u8];
 
@@ -169,8 +163,7 @@ pub fn convert_wide_to_ansi_string(
     }
 
     // This operation remains unsafe as we are trusting the caller's pointer
-    let wide_buffer_slice =
-        unsafe { std::slice::from_raw_parts(wide_str_ptr, max_wide_chars) };
+    let wide_buffer_slice = unsafe { std::slice::from_raw_parts(wide_str_ptr, max_wide_chars) };
 
     // Find the length of the *content* (excluding the null terminator).
     let wide_len_no_null = wide_buffer_slice
@@ -206,8 +199,7 @@ pub fn convert_wide_to_ansi_string(
 
     // Allocate the exact buffer size: content + 1 for the null.
     // We fill with 0s, so the buffer is already null-terminated.
-    let mut ansi_buffer: Vec<u8> =
-        vec![0u8; (required_ansi_bytes + 1) as usize];
+    let mut ansi_buffer: Vec<u8> = vec![0u8; (required_ansi_bytes + 1) as usize];
 
     // PASS 2: Perform the actual conversion.
     // It will not write its own null, as we passed an explicit length.
@@ -217,8 +209,8 @@ pub fn convert_wide_to_ansi_string(
             0,
             wide_content_slice,
             Some(&mut ansi_buffer), // Pass the mutable slice
-            None, // lpDefaultChar = None
-            None, // lpUsedDefaultChar = None
+            None,                   // lpDefaultChar = None
+            None,                   // lpUsedDefaultChar = None
         )
     };
 

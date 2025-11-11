@@ -1,7 +1,7 @@
 use windows::core::BOOL;
 
+use crate::loadinfo::{LOADINFO, set_loadinfo};
 use crate::version::fix_m_version;
-use crate::loadinfo::{set_loadinfo, LOADINFO};
 
 #[allow(dead_code)]
 #[repr(i32)]

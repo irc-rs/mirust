@@ -1,4 +1,7 @@
-use windows::Win32::{Foundation::HWND, System::Threading::GetCurrentThreadId, UI::WindowsAndMessaging::GetWindowThreadProcessId};
+use windows::Win32::{
+    Foundation::HWND, System::Threading::GetCurrentThreadId,
+    UI::WindowsAndMessaging::GetWindowThreadProcessId,
+};
 
 pub fn is_main_thread(hwnd: HWND) -> bool {
     unsafe {

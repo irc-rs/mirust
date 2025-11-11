@@ -42,7 +42,10 @@ pub fn get_loadinfo() -> &'static LOADINFO {
             m_bytes: 900,
         };
 
-        println!("Initializing LOADINFO with default mIRC version v5.6 (packed = {})", default_version);
+        println!(
+            "Initializing LOADINFO with default mIRC version v5.6 (packed = {})",
+            default_version
+        );
 
         loadinfo
     })
