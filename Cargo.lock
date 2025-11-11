@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "mirust"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mirust_macros",
  "windows",
@@ -12,9 +12,9 @@ dependencies = [
 
 [[package]]
 name = "mirust_macros"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbabff9436f21aa829315bd264d2c58161d91d51ca0d83cb73ef668d90757b60"
+checksum = "e5c7aecc382e367ab4df7df3a118a1fb9d0f7cf928b5bce8f4eb8f5870c0245d"
 dependencies = [
  "quote",
  "syn",

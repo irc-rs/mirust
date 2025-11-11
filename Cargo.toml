@@ -1,6 +1,6 @@
 [package]
 name = "mirust"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 description = "SDK for exporting mIRC/AdiIRC-compatible DLL functions in Rust."
@@ -12,7 +12,7 @@ categories = ["development-tools"]
 maintenance = { status = "passively-maintained" }
 
 [dependencies]
-mirust_macros = { version = "0.1" }
+mirust_macros = { version = "0.2" }
 
 [dependencies.windows]
 version = "0.62"
