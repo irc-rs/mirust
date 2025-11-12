@@ -1,6 +1,6 @@
 [package]
 name = "mirust"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "MIT"
 description = "SDK for exporting mIRC/AdiIRC-compatible DLL functions in Rust."

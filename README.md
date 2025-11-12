@@ -37,7 +37,7 @@ To use Mirust in your project:
 
     ```toml
     [dependencies]
-    mirust = { version = "0.1" }
+    mirust = { version = "0.2" }
     windows = { version = "0.62" }
     ```
 
