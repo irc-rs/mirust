@@ -1,0 +1,12 @@
+# Checks pull requests and pushes to branches other than master.
+# Pushes to master are checked by release.yml, which also publishes.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [master]
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml

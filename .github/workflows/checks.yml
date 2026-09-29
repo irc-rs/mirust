@@ -1,0 +1,45 @@
+# Formatting, lints, tests, docs and builds for every supported target.
+# Called by ci.yml (pull requests and branches) and release.yml (master).
+name: Checks
+
+on:
+  workflow_call:
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-pc-windows-msvc, x86_64-pc-windows-msvc, aarch64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Formatting
+        run: cargo fmt --check
+
+      - name: Tests (unit, doctests and README examples)
+        run: cargo test --locked
+
+      - name: Clippy
+        shell: bash
+        run: |
+          for target in i686-pc-windows-msvc x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
+            cargo clippy --locked --all-targets --target "$target" -- -D warnings
+          done
+
+      - name: Docs
+        run: cargo doc --locked --no-deps --target i686-pc-windows-msvc
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      - name: Build the example DLL for each target
+        shell: bash
+        run: |
+          for target in i686-pc-windows-msvc x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
+            cargo build --locked --release --example hello --target "$target"
+          done
+
+      - name: Package
+        run: cargo package --locked

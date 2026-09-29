@@ -1,0 +1,72 @@
+# On every push to master: run the checks, then publish to crates.io if the version in
+# Cargo.toml hasn't been published yet, and create a matching GitHub release.
+#
+# Publishing uses crates.io Trusted Publishing, so no token is stored. The trusted
+# publisher on crates.io must name this file (release.yml).
+name: Release
+
+on:
+  push:
+    branches: [master]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  publish:
+    needs: checks
+    runs-on: windows-latest
+    permissions:
+      id-token: write   # crates.io Trusted Publishing
+      contents: write   # tag and GitHub release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Is this version already on crates.io?
+        id: version
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | python -c "import json, sys; print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name'] == 'mirust'))")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # The sparse index lists every published version, one JSON object per line.
+          if curl -sf https://index.crates.io/mi/ru/mirust | grep -q "\"vers\":\"$version\""; then
+            echo "mirust $version is already published; nothing to do."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "mirust $version is new; publishing."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get a crates.io token
+        if: steps.version.outputs.publish == 'true'
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      - name: Publish
+        if: steps.version.outputs.publish == 'true'
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+      - name: Tag and create a GitHub release
+        if: steps.version.outputs.publish == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Use this version's section of CHANGELOG.md ("## X.Y.Z" up to the next "## ").
+          awk -v v="## $VERSION" '$0 == v { found = 1; next } found && /^## / { exit } found' \
+            CHANGELOG.md > notes.md
+          if [ -s notes.md ]; then
+            gh release create "v$VERSION" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file notes.md
+          else
+            gh release create "v$VERSION" --target "$GITHUB_SHA" --title "v$VERSION" --generate-notes
+          fi
