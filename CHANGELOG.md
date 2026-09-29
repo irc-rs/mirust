@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.1.0
+
+### Added
+
+- `mirc`: run commands and evaluate identifiers in mIRC from any thread, through mIRC's
+  SendMessage interface. `mirc::command` and `mirc::evaluate`, plus `mirc::Command` and
+  `mirc::Evaluate` for options (target window, plain text, flood protection, event
+  context, timeout).
+  - Calls never affect each other: from mIRC 6.2 each uses its own exclusively created,
+    never-reused shared-memory block; before 6.2, calls from the DLL take turns.
+  - Every failure is a `mirc::SendError`, including mIRC exiting (refused at once rather
+    than waiting), timeouts, SendMessage being disabled, and mIRC's detailed error codes
+    from 7.33. Text that doesn't fit is rejected, never truncated.
+  - Commands run as if typed: a leading `/` is added if missing, so identifiers aren't
+    evaluated unless the text starts with `//`.
+  - Tested in mIRC 6.03, 6.12, 6.2, 7.14, 7.32, 7.52 and 7.85, including 200 commands in a
+    row on mIRC's UI thread and four threads each making 300 requests at once, all with
+    correct results. In 7.85, also event context through `/signal`, and SendMessage
+    turned off (`Disabled` on every thread).
+
+### Changed
+
+- CI and release workflows use `actions/checkout@v7` (was `v4`).
+
+### Fixed
+
+- The README said mIRC 6.1 – 6.16 run only one `$dllcall()` per DLL at a time. That came
+  from a test that used `/noop`, which those versions lack; they run `$dllcall()`s
+  concurrently like later versions. The README also now notes that `/noop` needs 6.17.
+
 ## 1.0.0
 
 A complete rewrite. Not source-compatible with 0.x; see "Upgrading from 0.x" in the README.

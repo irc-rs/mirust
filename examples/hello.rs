@@ -11,7 +11,7 @@
 //!   //echo -a $dll(hello.dll, greet, World)
 //!   /dll hello.dll shout hello there
 //!   //echo -a $dll(hello.dll, info, $null)
-//!   /noop $dllcall(hello.dll, on_slow_done, slow, 3)
+//!   /noop $dllcall(hello.dll, on_slow_done, slow, 3)   (mIRC 6.17+, which has /noop)
 
 use std::thread;
 use std::time::Duration;

@@ -48,6 +48,7 @@ mirust has no dependencies and uses no procedural macros. It requires Rust 1.85 
 - [State, statics and concurrency](#state-statics-and-concurrency)
 - [Loading, unloading and `Config`](#loading-unloading-and-config)
 - [Background threads](#background-threads)
+- [Sending commands to mIRC](#sending-commands-to-mirc)
 - [The host: version, encoding and buffer sizes](#the-host-version-encoding-and-buffer-sizes)
 - [Panics and errors](#panics-and-errors)
 - [API at a glance](#api-at-a-glance)
@@ -245,7 +246,7 @@ to `$null` at once, and the script continues. When your function returns, mIRC:
 halt and no identifier to return a value to. **A returned value is lost.**
 
 **Use the returned command as the per-call callback**, with the result as its parameters,
-and pass `noop` (mIRC's do-nothing command) as the `$dllcall()` callback:
+and pass `noop` (mIRC's do-nothing command, from 6.17) as the `$dllcall()` callback:
 
 ```rust
 use mirust::{Call, Response};
@@ -477,10 +478,11 @@ Your responsibilities as a worker author:
 - Check the token regularly, and sleep with `wait_timeout` rather than `thread::sleep` so
   the worker reacts at once.
 - Don't block indefinitely, for example on network calls without a timeout.
-- **Once the token is stopped, don't make blocking calls into mIRC**, such as
+- **Once the token is stopped, don't make blocking calls into mIRC** yourself, such as
   `SendMessage` to its window. During the exit grace period mIRC's UI thread is waiting for
-  your workers and can't answer, so the call hangs until the grace period runs out. Use
-  `PostMessage` or `SendMessageTimeout` if you must.
+  your workers and can't answer, so the call hangs until the grace period runs out.
+  [`mirust::mirc`](#sending-commands-to-mirc) handles this for you: it refuses requests
+  during exit with `SendError::Exiting` instead of waiting.
 - Make `on_load` safe to run more than once (for example, guard one-time setup with a
   `static OnceLock`).
 - `spawn` returns `std::io::Result<()>` and the thread isn't joinable. Use a channel or a
@@ -491,12 +493,97 @@ use `Config::new().pin_module(true)`. The DLL then stays in memory until mIRC ex
 nothing can be unmapped under those threads. The cost is that its file stays locked until
 mIRC restarts, and `on_load` runs again whenever mIRC reloads it.
 
-Background threads can't hand results to mIRC directly; see [Limitations](#limitations).
-Store results in a `static` and have the script fetch them with `$dll()` (for example from
-a `/timer`), or return them from a `$dllcall()` as a command.
+Background threads can hand results to mIRC directly with
+[`mirust::mirc`](#sending-commands-to-mirc), for example
+`mirc::command("set %result 42")`.
 
 The [`worker` module docs](https://docs.rs/mirust/latest/mirust/worker/index.html) have the
 full details and the behaviour measured in real mIRC.
+
+## Sending commands to mIRC
+
+`mirust::mirc` runs commands and evaluates identifiers in mIRC from anywhere in your DLL:
+exported functions, `$dllcall()`s and background threads. It wraps mIRC's documented
+SendMessage interface (`WM_MCOMMAND` and `WM_MEVALUATE`).
+
+```rust
+use std::time::Duration;
+use mirust::{Call, Config, Host, mirc};
+
+fn loaded(_: &Host) {
+    mirust::spawn(|stop| {
+        while !stop.wait_timeout(Duration::from_secs(60)) {
+            // Background threads can talk to mIRC directly.
+            if let Err(e) = mirc::command("echo -s another minute passed") {
+                // Every failure is a value: mIRC busy, exiting, SendMessage disabled, ...
+                let _ = e;
+            }
+        }
+    })
+    .expect("failed to start worker");
+}
+
+mirust::config!(Config::new().on_load(loaded));
+
+/// $dll(my.dll, whoami, $null) returns your nickname, asked of mIRC.
+fn whoami(_: Call) -> String {
+    mirc::evaluate("$me").unwrap_or_default()
+}
+
+mirust::export!(whoami);
+```
+
+| Function / builder | Does |
+|--------------------|------|
+| `mirc::command(text)` | runs `text` as if typed in the main window's editbox |
+| `mirc::evaluate(text)` | evaluates `text` (such as `"$version"`) and returns the result |
+| `mirc::Command::new(text)` | a command with options: `.window(w)`, `.plain_text()`, `.flood_protection()`, `.event_id(id)`, `.timeout(d)`, then `.send()` |
+| `mirc::Evaluate::new(text)` | an evaluation with options: `.window(w)`, `.event_id(id)`, `.timeout(d)`, then `.send()` |
+
+**Commands run as if typed.** mirust adds a leading `/` if it is missing, so `"echo -a hi"`
+runs `/echo -a hi`. As when typing, a single `/` leaves identifiers and variables
+unevaluated: `/echo $me` prints `$me`. That keeps text built from user input from being
+evaluated by accident. Start the text with `//` to have mIRC evaluate it first (`//echo $me`
+prints your nickname). With `.plain_text()`, the text is sent as a message to the window's
+channel or query instead, and no `/` is added.
+
+**Calls never affect each other.** From mIRC 6.2, each call uses its own uniquely named
+shared-memory block, created exclusively and never reused, so calls in a row, or at the
+same time from different threads, can't see each other's data. mIRC 5.9 – 6.17 only read a
+single block named `mIRC`; there, calls from your DLL take turns. Text too long for the block
+is rejected rather than truncated.
+
+**Threads.** On mIRC's UI thread (in `/dll`, `$dll()`, `on_load`), mIRC runs the request
+before the call returns. From other threads, the request waits for mIRC's UI thread, for up
+to the timeout (5 seconds by default). While mIRC is exiting, requests from other threads
+fail at once with `SendError::Exiting`, because mIRC's UI thread is then waiting for your
+workers and can't answer.
+
+**Errors** are `mirc::SendError` values; nothing panics:
+
+| Error | Meaning |
+|-------|---------|
+| `Unsupported` | mIRC before 5.9, or `.event_id` before 7.33 |
+| `NoWindow` | no mIRC window, or it was destroyed while the request waited (for example as mIRC closed) |
+| `InvalidText`, `TooLong` | the text contains NUL, or doesn't fit (32,767 UTF-16 units; 65,535 bytes before 7.0) |
+| `Busy` | before 6.2 only: another program was using the `mIRC` block |
+| `Exiting` | mIRC is exiting; the request wasn't sent |
+| `Timeout` | mIRC didn't answer in time, or isn't responding |
+| `Disabled` | SendMessage is turned off in mIRC: Options → Other, or the Lock dialog (reported from 7.34) |
+| `Failed { code }` | mIRC reported a failure, such as an error in the command. From 7.33, `code` says why |
+| `System` | a Windows call failed |
+
+**Event context.** Inside a remote event, pass its `$eventid` to your DLL and give it to
+`.event_id(id)`: identifiers describing the event (`$nick`, `$chan`, `$signal`, ...) then
+refer to that event, as if the request ran inside it. The handler's own parameters (`$1-`)
+aren't included, so pass those in the text, and the id stops working once the event
+finishes (`Failed { code: Some(9) }`). Needs mIRC 7.33.
+
+Before mIRC 7.33 every failure looks the same (`Failed { code: None }`), and some failed
+commands are reported as successful. mIRC passes unknown commands to the IRC server, so an
+unknown command fails with a server error (for example "not connected to server") rather
+than "unknown command". Text is sent as UTF-16 from mIRC 7.0, and in the ANSI code page
+before.
 
 ## The host: version, encoding and buffer sizes
 
@@ -581,6 +668,8 @@ Everything public, from the crate root:
 | `Encoding` | enum | `Utf16`, `Utf8`, `Ansi`; `unit_size()` |
 | `WindowHandle` | struct | `from_raw`, `as_raw`, `is_null`, `is_current_thread` |
 | `buffer_capacity(version, reported_bytes)` | fn | the buffer-size rule mirust uses, for reference |
+| `mirc::command(text)`, `mirc::evaluate(text)` | fn | run a command or evaluate an identifier in mIRC, from any thread |
+| `mirc::Command`, `mirc::Evaluate`, `mirc::SendError` | structs, enum | the same with options (window, plain text, flood protection, event context, timeout), and why a request failed |
 | `worker` | module | documentation of background threads and exit handling |
 
 Full API documentation: <https://docs.rs/mirust>.
@@ -634,9 +723,11 @@ The docs for `Version` and `buffer_capacity` give the details.
 
 Version differences to be aware of:
 
-- `$dllcall()` exists from mIRC 6.1. **mIRC 6.1 – 6.16 run only one `$dllcall()` per DLL at
-  a time**: a `$dllcall()` into a DLL that is already running one is silently dropped by
-  mIRC. 6.17 and later run them concurrently. (Tested in 6.12, 6.14, 6.15, 6.16 and 6.17.)
+- `$dllcall()` exists from mIRC 6.1. Overlapping `$dllcall()`s into one DLL run
+  concurrently in every version tested (6.12, 6.14 – 6.17 and later).
+- `/noop`, used in this README to discard `$dllcall()`'s result and as a do-nothing
+  callback, exists from mIRC 6.17. On 6.1 – 6.16, discard the result with `/set` (for
+  example `set %ignored $dllcall(...)`) and name an alias of your own as the callback.
 - mirust recognises mIRC by its main window's class (`mIRC`, or `mIRC32` before 6.0), so
   renamed copies (such as `mircx.exe`) are still reported correctly.
 
@@ -645,10 +736,8 @@ tested in AdiIRC.
 
 ## Limitations
 
-- **No API for sending commands to mIRC from background threads.** mirust doesn't wrap
-  mIRC's `WM_MCOMMAND`/`WM_MEVALUATE` messages. From a worker, store results where a script
-  can fetch them, or send the messages yourself with other Win32 bindings (mind the rule
-  about blocking calls after `stop`).
+- **mIRC's user can turn off SendMessage** (Options → Other, or the Lock dialog), in which
+  case `mirust::mirc` requests fail with `Disabled` or `Failed`.
 - **Windows only.** mIRC loads only 32-bit x86 DLLs. AdiIRC loads x86, x64 or ARM64 DLLs,
   matching the AdiIRC build installed. The x64 and ARM64 builds compile, but haven't been
   run inside AdiIRC yet.

@@ -79,6 +79,31 @@ unsafe extern "system" {
 
     pub(crate) fn CloseHandle(handle: *mut c_void) -> i32;
 
+    pub(crate) fn CreateFileMappingW(
+        file: *mut c_void,
+        attributes: *const c_void,
+        protect: u32,
+        size_high: u32,
+        size_low: u32,
+        name: *const u16,
+    ) -> *mut c_void;
+
+    pub(crate) fn MapViewOfFile(
+        mapping: *mut c_void,
+        access: u32,
+        offset_high: u32,
+        offset_low: u32,
+        bytes: usize,
+    ) -> *mut c_void;
+
+    pub(crate) fn UnmapViewOfFile(view: *const c_void) -> i32;
+
+    pub(crate) fn GetLastError() -> u32;
+
+    pub(crate) fn GetTickCount64() -> u64;
+
+    pub(crate) fn GetCurrentProcessId() -> u32;
+
     pub(crate) fn GetModuleFileNameW(module: *mut c_void, filename: *mut u16, size: u32) -> u32;
 
     pub(crate) fn MultiByteToWideChar(
@@ -106,6 +131,17 @@ pub(crate) const WH_CALLWNDPROC: i32 = 4;
 pub(crate) const WM_DESTROY: u32 = 0x0002;
 pub(crate) const WM_ENDSESSION: u32 = 0x0016;
 pub(crate) const SMTO_ABORTIFHUNG: u32 = 0x0002;
+pub(crate) const SMTO_BLOCK: u32 = 0x0001;
+pub(crate) const SMTO_ERRORONEXIT: u32 = 0x0020;
+pub(crate) const WM_USER: u32 = 0x0400;
+pub(crate) const PAGE_READWRITE: u32 = 0x04;
+pub(crate) const FILE_MAP_WRITE: u32 = 0x0002;
+pub(crate) const FILE_MAP_READ: u32 = 0x0004;
+pub(crate) const ERROR_ALREADY_EXISTS: u32 = 183;
+pub(crate) const ERROR_TIMEOUT: u32 = 1460;
+pub(crate) const ERROR_INVALID_WINDOW_HANDLE: u32 = 1400;
+/// `INVALID_HANDLE_VALUE`: backs a file mapping with the paging file rather than a file.
+pub(crate) const INVALID_HANDLE_VALUE: *mut c_void = -1isize as *mut c_void;
 
 pub(crate) type HookProc =
     unsafe extern "system" fn(code: i32, wparam: usize, lparam: isize) -> isize;

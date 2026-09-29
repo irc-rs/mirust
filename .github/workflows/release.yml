@@ -24,7 +24,7 @@ jobs:
       id-token: write   # crates.io Trusted Publishing
       contents: write   # tag and GitHub release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 

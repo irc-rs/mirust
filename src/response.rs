@@ -19,7 +19,8 @@
 ///
 /// To get a result back from a `$dllcall()`, return a [`Command`](Self::Command) that runs
 /// your callback with the result, such as `Response::command_with("fetch_done $1-", value)`,
-/// and pass `noop` as the `$dllcall()` callback. (Verified in mIRC 7.83.)
+/// and pass `noop` (from mIRC 6.17; before that, an alias of your own) as the `$dllcall()`
+/// callback. (Verified in mIRC 7.83.)
 ///
 /// **Returned commands are delivered reliably, even when `$dllcall()`s overlap.** mIRC
 /// keeps each DLL's pending `$dllcall()` result in a single slot, which another call into

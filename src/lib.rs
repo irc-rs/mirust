@@ -46,6 +46,9 @@
 //! - **Background threads.** mIRC unmaps the DLL when it unloads it, which crashes any
 //!   thread still running inside it. Threads started with [`spawn`] keep the DLL mapped
 //!   until they finish and are told when to stop; see [`worker`].
+//! - **Talking to mIRC.** [`mirc::command`] and [`mirc::evaluate`] run commands and
+//!   evaluate identifiers in mIRC from any thread, safely and independently of each
+//!   other; see [`mirc`].
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs, unreachable_pub)]
@@ -60,6 +63,7 @@ mod delivery;
 mod encoding;
 mod entry;
 mod host;
+pub mod mirc;
 mod response;
 mod sys;
 mod version;

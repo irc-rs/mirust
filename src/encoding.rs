@@ -85,6 +85,16 @@ pub(crate) unsafe fn write(s: &str, ptr: *mut c_void, capacity: usize, encoding:
     }
 }
 
+/// How many code units of `encoding` `s` takes, without a terminator. `None` if Windows
+/// can't convert it to the ANSI code page.
+pub(crate) fn encoded_len(s: &str, encoding: Encoding) -> Option<usize> {
+    match encoding {
+        Encoding::Utf16 => Some(s.encode_utf16().count()),
+        Encoding::Utf8 => Some(s.len()),
+        Encoding::Ansi => wide_to_ansi(&s.encode_utf16().collect::<Vec<_>>()).map(|b| b.len()),
+    }
+}
+
 /// # Safety
 ///
 /// `ptr` must be valid for reads up to its NUL terminator or `max` elements.

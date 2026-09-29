@@ -63,11 +63,12 @@
 //!   `thread::sleep` so a sleeping worker reacts at once.
 //! - Avoid blocking indefinitely (for example network calls without a timeout). A worker
 //!   that never returns can't be stopped; it only keeps the DLL in memory.
-//! - **Once the token is stopped, don't make blocking calls into mIRC**, such as
+//! - **Once the token is stopped, don't make blocking calls into mIRC** yourself, such as
 //!   `SendMessage` to its window to run a command. During the exit grace period mIRC's UI
 //!   thread is inside mirust's wait and can't answer, so the call hangs until the grace
-//!   period runs out and the worker never gets to finish. If you must notify mIRC, use
-//!   `SendMessageTimeout` with a short timeout, or `PostMessage`.
+//!   period runs out and the worker never gets to finish. [`crate::mirc`] handles this: it
+//!   refuses requests during exit with [`SendError::Exiting`](crate::mirc::SendError::Exiting)
+//!   instead of waiting.
 //! - Make [`Config::on_load`](crate::Config::on_load) safe to run more than once. If a
 //!   worker is still finishing when mIRC reloads the DLL, the DLL was never unmapped, so
 //!   `LoadDll` runs again with statics intact.
@@ -396,6 +397,12 @@ pub(crate) fn unloading(exiting: bool) {
     if state.running == 0 {
         remove_hook(&mut state);
     }
+}
+
+/// Whether the process is ending: mIRC is exiting (or Windows is ending the session) and
+/// the exit grace period has started. mIRC's UI thread may then be waiting on our workers.
+pub(crate) fn is_exiting() -> bool {
+    REGISTRY.lock().exit_started.is_some()
 }
 
 /// Registers an exported function call. The returned guard keeps a `$dllcall()` counted
