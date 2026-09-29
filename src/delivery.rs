@@ -112,7 +112,7 @@ pub(crate) fn run_next() -> Response {
 }
 
 /// This DLL's full path, as Windows reports it.
-fn own_path() -> String {
+pub(crate) fn own_path() -> String {
     static PATH: OnceLock<String> = OnceLock::new();
     PATH.get_or_init(|| {
         let Some(module) = crate::entry::own_module() else {

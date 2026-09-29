@@ -10,7 +10,8 @@ implements that ABI for you, including:
 - the `LoadDll`/`UnloadDll` entry points and the `LOADINFO` handshake;
 - string encoding (ANSI, UTF-8 or UTF-16, depending on the mIRC version);
 - buffer sizes, which differ between releases and were misreported by some;
-- threads that outlive a call, which would otherwise crash mIRC when it unloads the DLL.
+- threads that outlive a call, which would otherwise crash mIRC when it unloads the DLL;
+- rendering your own graphics into mIRC windows, even the toolbar, at 60 frames per second.
 
 It supports every mIRC release since DLL support arrived in 5.6. You write ordinary Rust
 functions that take a `Call` and return a string or a `Response`.
@@ -49,6 +50,7 @@ mirust has no dependencies and uses no procedural macros. It requires Rust 1.85 
 - [Loading, unloading and `Config`](#loading-unloading-and-config)
 - [Background threads](#background-threads)
 - [Sending commands to mIRC](#sending-commands-to-mirc)
+- [Drawing into mIRC windows](#drawing-into-mirc-windows)
 - [The host: version, encoding and buffer sizes](#the-host-version-encoding-and-buffer-sizes)
 - [Panics and errors](#panics-and-errors)
 - [API at a glance](#api-at-a-glance)
@@ -414,6 +416,29 @@ Why mIRC unloads a DLL (`UnloadReason`):
 ahead without `UnloadDll`. So don't rely on `on_unload` alone for cleanup that must happen.
 mirust still stops background work and gives it the exit grace period in that case.
 
+**A DLL can unload itself.** Send `/dll -u` for its own path, `mirust::dll_path()`, from a
+worker thread. mIRC calls `UnloadDll` and frees the DLL, and because the worker holds it
+(see [Background threads](#background-threads)), it stays mapped until the worker returns:
+
+```rust,no_run
+use mirust::{Call, mirc};
+
+fn goodbye(_: Call) {
+    mirust::spawn(|_stop| {
+        // ... clean up, then:
+        let _ = mirc::command(&format!("dll -u \"{}\"", mirust::dll_path()));
+    })
+    .expect("failed to start worker");
+}
+
+mirust::export!(goodbye);
+# fn main() {}
+```
+
+Send it from the worker, not from the exported function: mIRC never unloads a DLL while one
+of its functions is running. The `m_nyancat` project unloads itself this way when its `stop`
+function is called (checked in mIRC 7.85: gone from the process within 0.2 s).
+
 `config!` works by exporting a hidden function, `__mirust_config`, which mirust's
 `LoadDll` looks up. It has the signature mIRC expects of every exported function, so a
 script that calls it by name (`/dll my.dll __mirust_config`) does nothing harmful. Invoking
@@ -585,6 +610,192 @@ unknown command fails with a server error (for example "not connected to server"
 than "unknown command". Text is sent as UTF-16 from mIRC 7.0, and in the ANSI code page
 before.
 
+## Drawing into mIRC windows
+
+`mirust::canvas` lets Rust render frames straight into an mIRC **picture window**, using
+mIRC's `/drawdll` command (mIRC 7.83 and later). `/drawdll` calls a function in your DLL and
+hands it the window's bitmap, so there are no per-shape script commands and no image files:
+Rust draws a whole frame and copies it in.
+
+```rust
+use mirust::canvas::{Draw, Image, Update, rgb};
+
+/// /drawdll -n @scene "C:\path\shade.dll" gradient
+fn gradient(draw: Draw) -> Update {
+    let canvas = draw.canvas();
+    let mut image = Image::new(canvas.width(), canvas.height());
+    for (i, pixel) in image.pixels_mut().iter_mut().enumerate() {
+        *pixel = rgb((i % 256) as u8, 64, 160);
+    }
+    canvas.draw(&image);
+    Update::Redraw
+}
+
+// Like `export!`, but for functions that draw. It takes several functions, `as "Name"`
+// and paths, just as `export!` does.
+mirust::export_draw!(gradient);
+```
+
+A script creates the window and calls the function:
+
+```text
+/window -pk0 @scene 20 20 420 320
+/drawdll -n @scene "C:\path\shade.dll" gradient any text, available as draw.data()
+```
+
+**Animation.** Have a worker thread (see [Background threads](#background-threads)) send
+the command once per frame. `canvas::draw_command` builds it, quoting the DLL's own path for
+you. Render on the worker into an `Image` and copy it in from the export, because the export
+runs on mIRC's UI thread and must be quick:
+
+```rust,no_run
+use std::time::{Duration, Instant};
+use mirust::{Call, canvas, mirc};
+
+fn animate(_: Call) {
+    mirust::spawn(|stop| {
+        let interval = Duration::from_micros(1_000_000 / 60);
+        let begin = Instant::now();
+        for frame in 0u32.. {
+            let command = canvas::draw_command("@scene", "render", &frame.to_string());
+            if mirc::command(&command).is_err() {
+                break; // mIRC is exiting, or the window is gone
+            }
+            let due = begin + interval * (frame + 1);
+            if stop.wait_timeout(due.saturating_duration_since(Instant::now())) {
+                break;
+            }
+        }
+    })
+    .expect("failed to start worker");
+}
+
+mirust::export!(animate);
+# fn main() {}
+```
+
+| Item | Purpose |
+|------|---------|
+| `export_draw!(f, g as "Name")` | exports functions callable as `fn(Draw) -> impl IntoUpdate` |
+| `Draw` | one call: `canvas()`, `data()` (the text after the export's name), `main_window()`, `active_window()`, `host()` |
+| `Canvas` | the window's bitmap: `width()`, `height()`, `draw(&image)`, `draw_at(&image, x, y)`, and raw `hdc()` / `bitmap()` for GDI |
+| `Image` | pixels to copy in: `new`, `width`, `height`, `pixels`, `pixels_mut`, `fill`, `scaled(factor)` |
+| `rgb(r, g, b)` | packs a pixel; pixels are `0x00RRGGBB` |
+| `Update` | what mIRC redraws afterwards: `Redraw`, `Area { left, top, right, bottom }`, `Skip`, `Default` |
+| `draw_command(window, export, data)` | the `/drawdll` command for one of your exports |
+
+`Update` values, checked in mIRC 7.85. The command must use `-n` (as `draw_command` does):
+
+| Value | Effect |
+|-------|--------|
+| `Redraw` (also what `()` means) | the whole window is redrawn |
+| `Area { .. }` | only that rectangle is redrawn |
+| `Skip` | nothing is redrawn |
+| `Default` | mIRC decides: with `-n`, nothing is redrawn |
+
+`Skip` and `Area` change the bitmap all the same: the part that wasn't redrawn shows the new
+picture as soon as something redraws it.
+
+**The picture window.**
+
+- Its bitmap is the window's *client area*: the window's width minus 22 and height minus 56
+  pixels. mIRC won't make a window narrower than about 198 pixels, so the smallest bitmap is
+  about 176 pixels wide. `Canvas::width` and `height` give the real size.
+- Add `-h` to `/window` to keep the window hidden. Drawing works the same.
+- `Draw` and `Canvas` are not `Send`: the handles are only valid until the function returns.
+- If a script calls an exported drawing function any other way, such as `/dll`, there is no
+  bitmap and nothing happens. A panic halts the script, as with `export!`.
+
+**Speed** (mIRC 7.85, 32-bit). These were measured on a 60 Hz monitor, so at most 60 frames
+per second could be *seen*; that is a limit of the test display, not of mIRC or `/drawdll`:
+
+| Frame | Copying it into the window | Result |
+|-------|----------------------------|--------|
+| 398 × 264 | about 0.25 ms | 60 frames per second, none dropped |
+| 1920 × 1080 | about 2 ms on mIRC's UI thread | 58 of 60 frames per second shown, with about 6 ms of Rust rendering on 28 cores |
+
+For comparison, saving each frame as a BMP and drawing it with `/drawpic` costs about 6 ms at
+398 × 264 and 11 ms at 878 × 644. Rendering is on you: a full-window Mandelbrot zoom took
+about 55 ms a frame at 1280 × 720, so heavy scenes belong on worker threads, at a lower
+resolution, or both.
+
+### In the toolbar
+
+A picture window can be the picture of a toolbar button: `/toolbar -a name tip @scene`
+(16 × 16 to 256 × 256 pixels; add `x y w h` to use part of the bitmap). The button doesn't
+follow the window, so refresh it after each frame with `/toolbar -p name @scene`. (`-pu`
+also forces an immediate update, which mIRC 7.85 doesn't need and which costs about 0.2 ms
+a frame more on its UI thread.) Both commands fit in one string, which is one round trip
+to mIRC:
+
+```rust,no_run
+use mirust::{canvas, mirc};
+
+let frame = canvas::draw_command("@scene", "render", "42");
+let _ = mirc::command(&format!("{frame} | toolbar -p scene @scene 0 0 120 32"));
+```
+
+`m_nyancat`, a separate project built on this, does exactly this: a pixel-art cat and rainbow
+trail animate at 10 frames per second, like the original, in the toolbar, filling all the
+room the toolbar has left. In mIRC 7.85 the pipeline, toolbar refresh included, kept up with
+a target of 120 frames per second, though the 60 Hz test monitor could only show 60.
+
+**Fitting the toolbar.** A button can size itself to the toolbar: fill all the room left
+of the other buttons, at the height of their row, and follow the window as it is resized.
+mIRC's toolbar is a standard Windows toolbar (class `mIRC_ToolBar`), so `TB_GETITEMRECT`
+gives every visible button's rectangle, in real pixels at whatever display scaling is in
+use. What it showed in mIRC 7.85:
+
+- A picture button is its picture plus a padding on each side (21 pixels at 150% scaling),
+  and the toolbar is as tall as its tallest button. The padding can't be asked for, but it
+  is your own button's rectangle minus the picture size you gave mIRC.
+- So the picture that fits the row is *the other buttons' height minus the padding*: 16
+  pixels with mIRC's default icons, more with larger icons. A taller picture makes the
+  whole toolbar taller, by the difference: a 32 pixel picture made this toolbar 55 pixels
+  tall instead of 39, and 48 pixels made it 71.
+- A button that is too wide wraps onto a second row and makes the toolbar twice as tall.
+  Once it has wrapped, its own position is no use for measuring; the room is what's left
+  after the previous button.
+- The smallest picture mIRC takes is 16 pixels wide, so a button needs room for that plus
+  its padding. With less it wraps onto a row of its own, which makes the toolbar taller.
+- While mIRC is minimized nobody can see the toolbar, but mIRC still redraws it in full
+  every frame (about 2.5 ms of its UI thread with 8 buttons), so skip frames then
+  (`IsIconic` on the main window works from any thread).
+- Buttons added to the toolbar later go after yours. Count the toolbar's buttons
+  (`TB_BUTTONCOUNT`) to notice, and delete and add yours again to move them to the end.
+- Change the size with `/toolbar -p name @scene 0 0 w h`, the same command that refreshes
+  the picture, so nothing is removed or re-added.
+- Measure on mIRC's UI thread, such as inside a drawing export, where sending messages to
+  the toolbar is safe. Measuring makes the toolbar lay itself out again, which costs too
+  much to do every frame with several buttons (about 0.8 ms each), so do it a couple of
+  times a second.
+
+**A picture is at most 256 × 256 pixels.** `/toolbar` rejects anything bigger with
+"invalid image size", so one button can't fill a wide toolbar. Use as few
+buttons as will fill it, side by side, each showing a slice of the picture window's bitmap
+(`x y w h`). The slices are stacked one above the other in the bitmap, which stays 256
+pixels wide, and size the window to exactly the height they need: a bigger
+bitmap makes every frame cost mIRC more. The padding around each picture leaves a gap
+between slices (20 pixels at 150% scaling), so the scene is drawn as if the gaps were there,
+and its stars and rainbow carry on behind them. Send `/toolbar` commands that add or delete
+buttons one at a time: mIRC does nothing with a `|` chain that contains `/toolbar -a` or
+`-d`, and still reports success. Chains that start with `/drawdll` or `/toolbar -p` work.
+
+**What it costs mIRC.** Only the last step has to run on mIRC's UI thread, so render each
+frame on a worker thread and let the export just copy it in (about 0.02 ms).
+Per frame, in mIRC 7.85, the UI thread is busy for about 0.65 ms with one 16 pixel button,
+and about 2.2 ms with the 8 buttons of 32 pixels that fill this 4K display's
+toolbar (1.8 ms at 16 pixels). At 10 frames per second that is about 2% of the thread's
+time, and it would be three times that at 30. Nearly all of it is mIRC's own work: about
+0.14 ms to receive a command, 0.15 ms to run `/drawdll`, and 0.15 to 0.35 ms to refresh each
+button. mIRC has to do that on its UI thread, since it owns the window and the toolbar. If mIRC is too busy to
+keep up (a long script, say), a worker can wait, and then skip the frames it missed instead
+of sending them all at once: `m_nyancat` did this, and with the UI thread blocked for 1.5 s
+its animation jumped forward 15 frames and carried on at 10 per second.
+
+Not tested: AdiIRC (whether it supports `/drawdll` is unknown), and mIRC before 7.83, which
+doesn't have `/drawdll`.
+
 ## The host: version, encoding and buffer sizes
 
 `call.host()` or `mirust::host()` returns a `Host` describing the client that loaded the
@@ -662,6 +873,7 @@ Everything public, from the crate root:
 | `spawn(f)` | fn | starts a background thread that is safe across unloads; `f: FnOnce(StopToken)` |
 | `StopToken` | struct | `is_stopped()`, `wait()`, `wait_timeout(Duration) -> bool` |
 | `host()` | fn | the `Host`, from anywhere |
+| `dll_path()` | fn | this DLL's full path, for commands such as `/dll -u` |
 | `Host` | struct | `client`, `version`, `beta`, `main_window`, `encoding`, `capacity`, `keep_loaded` |
 | `Client` | enum | `Mirc`, `AdiIrc`; `Client::of_window(window)` |
 | `Version` | struct | `new`, `from_raw`, `to_raw`, `major`, `minor`, `V5_6` … `V7_84` constants, `Display`, `Ord` |
@@ -670,6 +882,8 @@ Everything public, from the crate root:
 | `buffer_capacity(version, reported_bytes)` | fn | the buffer-size rule mirust uses, for reference |
 | `mirc::command(text)`, `mirc::evaluate(text)` | fn | run a command or evaluate an identifier in mIRC, from any thread |
 | `mirc::Command`, `mirc::Evaluate`, `mirc::SendError` | structs, enum | the same with options (window, plain text, flood protection, event context, timeout), and why a request failed |
+| `canvas` | module | render frames into mIRC picture windows with `/drawdll` (7.83+): `Draw`, `Canvas`, `Image`, `Update`, `IntoUpdate`, `rgb`, `draw_command` |
+| `export_draw!(f, g as "Name")` | macro | exports functions callable as `fn(Draw) -> impl IntoUpdate`, for `/drawdll` |
 | `worker` | module | documentation of background threads and exit handling |
 
 Full API documentation: <https://docs.rs/mirust>.
@@ -738,6 +952,9 @@ tested in AdiIRC.
 
 - **mIRC's user can turn off SendMessage** (Options → Other, or the Lock dialog), in which
   case `mirust::mirc` requests fail with `Disabled` or `Failed`.
+- **Drawing needs mIRC 7.83 or later** (`/drawdll`) and a picture window. A toolbar button
+  showing one doesn't follow the window by itself; see
+  [Drawing into mIRC windows](#drawing-into-mirc-windows).
 - **Windows only.** mIRC loads only 32-bit x86 DLLs. AdiIRC loads x86, x64 or ARM64 DLLs,
   matching the AdiIRC build installed. The x64 and ARM64 builds compile, but haven't been
   run inside AdiIRC yet.

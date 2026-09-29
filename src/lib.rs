@@ -49,6 +49,8 @@
 //! - **Talking to mIRC.** [`mirc::command`] and [`mirc::evaluate`] run commands and
 //!   evaluate identifiers in mIRC from any thread, safely and independently of each
 //!   other; see [`mirc`].
+//! - **Drawing.** [`canvas`] lets Rust render frames straight into an mIRC picture window
+//!   with `/drawdll`, fast enough for 60 fps animation, even in the toolbar.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs, unreachable_pub)]
@@ -58,6 +60,7 @@
 compile_error!("mirust only supports Windows targets; mIRC and AdiIRC are Windows programs.");
 
 mod call;
+pub mod canvas;
 mod config;
 mod delivery;
 mod encoding;
@@ -79,6 +82,22 @@ pub use host::{Client, Host, WindowHandle, buffer_capacity, host};
 pub use response::{IntoResponse, Response};
 pub use version::Version;
 pub use worker::{StopToken, spawn};
+
+/// The full path of this DLL, as Windows reports it, such as `C:\scripts\my.dll`.
+///
+/// Useful for commands that name the DLL, like `/dll -u "<path>"` to unload it (a DLL can
+/// unload itself from a worker started with [`spawn`]: mirust keeps it mapped until the
+/// worker returns) or [`canvas::draw_command`]. Empty if Windows can't say, which doesn't
+/// happen for a DLL loaded by mIRC.
+///
+/// ```no_run
+/// let path = mirust::dll_path();
+/// let _ = mirust::mirc::command(&format!("dll -u \"{path}\""));
+/// ```
+#[must_use]
+pub fn dll_path() -> String {
+    delivery::own_path()
+}
 
 // Compiles the README's Rust examples as doctests, so they can't drift from the API.
 #[cfg(doctest)]
@@ -148,7 +167,38 @@ macro_rules! config {
 #[macro_export]
 macro_rules! export {
     ($($($segment:ident)::+ $(as $name:literal)?),+ $(,)?) => {
-        $( $crate::__export_one!([$($segment)::+] [$($segment)+] $($name)?); )+
+        $( $crate::__export_one!($crate::runtime::dispatch; [$($segment)::+] [$($segment)+] $($name)?); )+
+    };
+}
+
+/// Exports functions that draw into picture windows, for mIRC's `/drawdll` (7.83 and later).
+///
+/// Each function must be callable as `fn(`[`Draw`](canvas::Draw)`) -> impl `[`IntoUpdate`](canvas::IntoUpdate).
+/// The export takes the function's name unless you give another with `as`, exactly as with
+/// [`export!`]:
+///
+/// ```
+/// use mirust::canvas::{Draw, Image, Update, rgb};
+///
+/// fn clear(draw: Draw) -> Update {
+///     let canvas = draw.canvas();
+///     let mut image = Image::new(canvas.width(), canvas.height());
+///     image.fill(rgb(0, 0, 64));
+///     canvas.draw(&image);
+///     Update::Redraw
+/// }
+///
+/// mirust::export_draw!(clear);
+/// # fn main() {}
+/// ```
+///
+/// Call it with `/drawdll -n @window "<path to the DLL>" clear`; [`canvas::draw_command`]
+/// builds that command for you. If a script calls the export any other way, such as
+/// `/dll`, there is no bitmap to draw into and it does nothing. See the [`canvas`] module.
+#[macro_export]
+macro_rules! export_draw {
+    ($($($segment:ident)::+ $(as $name:literal)?),+ $(,)?) => {
+        $( $crate::__export_one!($crate::runtime::dispatch_draw; [$($segment)::+] [$($segment)+] $($name)?); )+
     };
 }
 
@@ -156,13 +206,13 @@ macro_rules! export {
 #[macro_export]
 macro_rules! __export_one {
     // No `as "name"`: export under the path's last segment.
-    ([$($path:tt)+] [$last:ident]) => {
-        $crate::__export_one!([$($path)+] [] ::core::stringify!($last));
+    ($dispatch:path; [$($path:tt)+] [$last:ident]) => {
+        $crate::__export_one!($dispatch; [$($path)+] [] ::core::stringify!($last));
     };
-    ([$($path:tt)+] [$first:ident $($rest:ident)+]) => {
-        $crate::__export_one!([$($path)+] [$($rest)+]);
+    ($dispatch:path; [$($path:tt)+] [$first:ident $($rest:ident)+]) => {
+        $crate::__export_one!($dispatch; [$($path)+] [$($rest)+]);
     };
-    ([$($path:tt)+] [$($segment:ident)*] $name:expr) => {
+    ($dispatch:path; [$($path:tt)+] [$($segment:ident)*] $name:expr) => {
         const _: () = {
             #[unsafe(export_name = $name)]
             unsafe extern "system" fn export(
@@ -176,7 +226,7 @@ macro_rules! __export_one {
                 // SAFETY: mIRC calls exported functions with this signature and buffers
                 // sized as described by `Host::capacity`.
                 unsafe {
-                    $crate::runtime::dispatch(
+                    $dispatch(
                         main_window,
                         active_window,
                         data,

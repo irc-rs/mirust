@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+
+- `canvas`: render frames from Rust straight into an mIRC picture window, through mIRC's
+  `/drawdll` (mIRC 7.83 and later). `export_draw!` exports functions of the form
+  `fn(Draw) -> impl IntoUpdate`; `Draw` and `Canvas` give access to the window's bitmap,
+  `Image` holds `0x00RRGGBB` pixels to copy in (`Canvas::draw`, `draw_at`), and `Update`
+  says what mIRC should redraw (`Redraw`, `Area`, `Skip`, `Default`). `draw_command` builds
+  the `/drawdll` command for one of your own exports, quoting the DLL's path.
+  - Fast: in mIRC 7.85 a 1920 × 1080 frame takes about 2 ms to copy in and a 398 × 264
+    frame 0.25 ms, against about 6 ms and 11 ms for drawing a BMP with `/drawpic` (before
+    counting writing the file).
+  - A picture window can be a toolbar button's picture. The button doesn't follow the
+    window, so refresh it with `/toolbar -p name @window` after each frame; both commands
+    fit in one `mirc::command` string.
+  - Calling a drawing export any way other than `/drawdll` does nothing; a panic halts the
+    script.
+  - Tested in mIRC 7.85: each `Update` variant, a panicking export, a DLL path containing a
+    space, and 30, 60 and 120 frames per second into a toolbar button, with every frame
+    sent reaching the export.
+- `dll_path()`: the DLL's own full path, for commands that name it, such as `/dll -u` to
+  unload itself from a worker (the worker keeps the DLL mapped until it returns).
+- Notes on drawing into a toolbar button in the README (the 256 pixel limit, sizing to the
+  toolbar with `TB_GETITEMRECT`, what it costs mIRC), from `m_nyancat`, a separate project
+  that animates Nyan Cat in mIRC's toolbar with `canvas`.
+
 ## 1.1.0
 
 ### Added

@@ -196,3 +196,53 @@ unsafe extern "system" {
         result: *mut usize,
     ) -> isize;
 }
+
+/// `BITMAP`, as filled in by `GetObjectW` for a bitmap handle.
+#[repr(C)]
+pub(crate) struct Bitmap {
+    pub(crate) bm_type: i32,
+    pub(crate) bm_width: i32,
+    pub(crate) bm_height: i32,
+    pub(crate) bm_width_bytes: i32,
+    pub(crate) bm_planes: u16,
+    pub(crate) bm_bits_pixel: u16,
+    pub(crate) bm_bits: *mut c_void,
+}
+
+/// `BITMAPINFOHEADER`.
+#[repr(C)]
+pub(crate) struct BitmapInfoHeader {
+    pub(crate) size: u32,
+    pub(crate) width: i32,
+    pub(crate) height: i32,
+    pub(crate) planes: u16,
+    pub(crate) bit_count: u16,
+    pub(crate) compression: u32,
+    pub(crate) size_image: u32,
+    pub(crate) x_pels_per_meter: i32,
+    pub(crate) y_pels_per_meter: i32,
+    pub(crate) colors_used: u32,
+    pub(crate) colors_important: u32,
+}
+
+pub(crate) const DIB_RGB_COLORS: u32 = 0;
+
+#[link(name = "gdi32")]
+unsafe extern "system" {
+    pub(crate) fn GetObjectW(handle: *mut c_void, size: i32, object: *mut c_void) -> i32;
+
+    pub(crate) fn SetDIBitsToDevice(
+        hdc: *mut c_void,
+        x_dest: i32,
+        y_dest: i32,
+        width: u32,
+        height: u32,
+        x_src: i32,
+        y_src: i32,
+        start_line: u32,
+        line_count: u32,
+        bits: *const c_void,
+        info: *const BitmapInfoHeader,
+        usage: u32,
+    ) -> i32;
+}
