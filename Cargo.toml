@@ -11,7 +11,7 @@ documentation = "https://docs.rs/mirust"
 readme = "README.md"
 keywords = ["irc", "mirc", "adiirc", "dll", "ffi"]
 categories = ["api-bindings", "development-tools::ffi", "os::windows-apis"]
-exclude = ["/.github", "/mirc_docs", "/MATRIX.md"]
+exclude = ["/.github", "/assets"]
 
 [dependencies]
 

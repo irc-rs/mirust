@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/irc-rs/mirust/master/assets/mirust-logo.png" alt="mirust" width="300">
+</p>
+
 # mirust
 
 Write [mIRC](https://www.mirc.com) and [AdiIRC](https://adiirc.com) DLLs in safe, idiomatic
@@ -58,6 +62,7 @@ mirust has no dependencies and uses no procedural macros. It requires Rust 1.85 
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
 - [Upgrading from 0.x](#upgrading-from-0x)
+- [Projects using mirust](#projects-using-mirust)
 
 ## Quick start
 
@@ -994,6 +999,22 @@ tested in AdiIRC.
 
 See [CHANGELOG.md](CHANGELOG.md) for everything that changed.
 
+## Projects using mirust
+
+- [m_nowplaying](https://github.com/irc-rs/m_nowplaying), lets mIRC and AdiIRC scripts ask
+  Windows what media is playing, so you can show the current track in a channel
+- [m_nyancat](https://github.com/irc-rs/m_nyancat), a pixel-art Nyan Cat animated in mIRC's
+  toolbar
+
+Built something with mirust? Add a link to your README with this button, and open an issue
+or pull request to get your project listed above.
+
+<a href="https://github.com/irc-rs/mirust"><img src="https://raw.githubusercontent.com/irc-rs/mirust/master/assets/powered-by-mirust.png" alt="Powered by mirust" width="220"></a>
+
+```markdown
+<a href="https://github.com/irc-rs/mirust"><img src="https://raw.githubusercontent.com/irc-rs/mirust/master/assets/powered-by-mirust.png" alt="Powered by mirust" width="220"></a>
+```
+
 ## License
 
-[MIT](LICENSE.md) © 2025 Joshua Byrnes
+[MIT](LICENSE.md) © 2025-2026 Joshua Byrnes
